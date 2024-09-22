@@ -1,4 +1,4 @@
-# SM-NT-Name-Manager
+# SM-NT-Name-Manager - Very experimental!
 Sourcemod Plugin for Neotokyo that stores a default name for every client, can automatically change to that name to prevent fake-nicks  
 
 `!forcename` : Store a default name for a client, it will default to the first name they ever use on the server after installing the plugin, you can override this with the command to anything you want.   
