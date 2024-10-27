@@ -1,5 +1,10 @@
+#include <sourcemod>
 #include <sdktools>
 #include <clientprefs>
+
+#pragma semicolon 1
+#pragma newdecls required
+
 
 Handle CookiePlayerName;
 Handle CookieForceName;
@@ -14,9 +19,9 @@ int g_forceMode;
 
 public Plugin myinfo = {
 	name = "NT Name Manager",
-	author = "bauxite, credits to Teamkiller324",
+	author = "bauxite, credits to Teamkiller324, Glubsy",
 	description = "!forcename, !storename, !shownames, cvar sm_name_force 0/1/2",
-	version = "0.3.3",
+	version = "0.3.6",
 	url = "https://github.com/bauxiteDYS/SM-NT-Name-Manager",
 };
 
@@ -27,8 +32,8 @@ public void OnPluginStart()
 	HookConVarChange(NameForceBehaviour, NameForceBehaviour_Changed);
 	CookiePlayerName = RegClientCookie("Player_Name", "Stores Clients Name", CookieAccess_Private);
 	CookieForceName = RegClientCookie("Force_Name", "Force Name", CookieAccess_Private);
-	RegAdminCmd("sm_storename", StoreName, ADMFLAG_GENERIC, "Stores a clients name");
-	RegAdminCmd("sm_forcename", ForceName, ADMFLAG_GENERIC, "Force a clients name");
+	RegAdminCmd("sm_storename", StoreName, ADMFLAG_GENERIC, "Stores a clients name, <target> <newname>");
+	RegAdminCmd("sm_forcename", ForceName, ADMFLAG_GENERIC, "Force a clients name, <target> <new name>, or just <target> to remove force");
 	RegAdminCmd("sm_shownames", ShowName, ADMFLAG_GENERIC, "Show current and stored names in console");
 	AddCommandListener(Command_JoinTeam, "jointeam");
 	HookEvent("player_changename", OnPlayerChangeName, EventHookMode_Pre);
@@ -87,7 +92,7 @@ void NameForceBehaviour_Changed(ConVar convar, const char[] oldValue, const char
 
 public Action Command_JoinTeam(int client, const char[] command, int argc)
 {
-	if(g_forceMode != 0)
+	if(g_forceMode == 0)
 	{
 		return Plugin_Continue;
 	}
@@ -197,8 +202,9 @@ public Action ShowName(int client, int args)
 
 public Action ForceName(int client, int args)
 {
-	if(args == 0)
+	if(args == 0 || args >= 3)
 	{
+		PrintToChat(client, "[Name Manager] Wrong number of arguments: <target> <newname> or <target> to remove force");
 		return Plugin_Handled;
 	}
 	
@@ -208,17 +214,17 @@ public Action ForceName(int client, int args)
 	int target = FindTarget(client, arg1Target, true, true);
 	if(target == -1)
 	{
-		ReplyToCommand(client, "target not found");
+		ReplyToCommand(client, "[Name Manager] Target not found");
 		return Plugin_Handled;
 	}
 	
 	if(!IsClientInGame(target) || !g_cookiesCached[target])
 	{
-		ReplyToCommand(client, "Target cookies are not cached or they are not in game, try again later");
+		ReplyToCommand(client, "[Name Manager] Target cookies are not cached or they are not in game, try again later");
 		return Plugin_Handled;
 	}
 	
-	if(args == 1)
+	if(args == 1) // toggle instead of remove?
 	{
 		SetClientCookie(target, CookieForceName, "0");
 		g_forceName[target] = false;
@@ -232,7 +238,7 @@ public Action ForceName(int client, int args)
 
 	if(g_settingName[target])
 	{
-		ReplyToCommand(client, "Already setting name, try again later");
+		ReplyToCommand(client, "[Name Manager] Already setting name, try again later");
 		return Plugin_Handled;
 	}
 	
@@ -253,6 +259,7 @@ public Action StoreName(int client, int args)
 {
 	if(args != 2)
 	{
+		PrintToChat(client, "[Name Manager] Wrong number of arguments: <target> <newname>");
 		return Plugin_Handled;
 	}
 	
@@ -265,19 +272,19 @@ public Action StoreName(int client, int args)
 	int target = FindTarget(client, arg1Target, true, true);
 	if(target == -1)
 	{
-		ReplyToCommand(client, "target not found");
+		ReplyToCommand(client, "[Name Manager] Target not found");
 		return Plugin_Handled;
 	}
 	
 	if(!IsClientInGame(target) || !g_cookiesCached[target])
 	{
-		ReplyToCommand(client, "Target cookies are not cached or they are not in game, try again later");
+		ReplyToCommand(client, "[Name Manager] Target cookies are not cached or they are not in game, try again later");
 		return Plugin_Handled;
 	}
 	
 	if(g_settingName[target])
 	{
-		ReplyToCommand(client, "Already setting name, try again later");
+		ReplyToCommand(client, "[Name Manager] Already setting name, try again later");
 		return Plugin_Handled;
 	}
 	
