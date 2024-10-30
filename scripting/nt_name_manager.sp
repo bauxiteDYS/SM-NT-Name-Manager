@@ -81,7 +81,7 @@ void NameForceBehaviour_Changed(ConVar convar, const char[] oldValue, const char
 				CloseHandle(g_checkTimer[i]);
 			}
 			
-			g_checkTimer[i] = CreateTimer(0.5, CheckNameTimer, GetClientUserId(i), TIMER_FLAG_NO_MAPCHANGE);
+			g_checkTimer[i] = CreateTimer(1.0, CheckNameTimer, GetClientUserId(i), TIMER_FLAG_NO_MAPCHANGE);
 		}
 	}
 }
@@ -233,23 +233,21 @@ public Action ResetListCooldown(Handle timer)
 
 public Action StoreName(int client, int args)
 {
-	char cmdName[12 + 1];
+	char cmdName[4 + 1];
 	GetCmdArg(0, cmdName, sizeof(cmdName));
 	char cmdChar = CharToLower(cmdName[3]);
-	PrintToServer("char %c", cmdChar);
-	
 	bool forceName = cmdChar == 'f' ? true : false;
 	
 	if(args != 2)
 	{
 		if(forceName)
 		{
-			PrintToChat(client, "[Name Manager] Usage: sm_forcename <target> <on/off> - to change force mode on a client");
+			ReplyToCommand(client, "[Name Manager] Usage: sm_forcename <target> <on/off> - to change force mode on a client");
 			return Plugin_Handled;
 		}
 		else
 		{
-			PrintToChat(client, "[Name Manager] Usage: sm_storename <target> <newname>");
+			ReplyToCommand(client, "[Name Manager] Usage: sm_storename <target> <newname>");
 			return Plugin_Handled;
 		}
 	}
