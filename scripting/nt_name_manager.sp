@@ -51,11 +51,12 @@ public void OnPluginStart()
 	
 	if(g_lateLoad)
 	{
+		g_forceMode = NameForceBehaviour.IntValue;
+		
 		for(int client = 1; client <= MaxClients; client++)
 		{
 			if(IsClientInGame(client))
 			{
-				g_forceMode = NameForceBehaviour.IntValue;
 				OnClientCookiesCached(client);
 			}
 		}
@@ -188,18 +189,6 @@ public Action CheckNameTimer(Handle timer, int userid)
 	#endif
 	
 	CreateTimer(3.0, SetNameTimer, userid, TIMER_FLAG_NO_MAPCHANGE);
-	
-	/*
-	if(!StrEqual(bufName, g_playerNames[client]))
-	{
-		CreateTimer(3.0, SetNameTimer, userid, TIMER_FLAG_NO_MAPCHANGE);
-	}
-	else
-	{
-		g_nameChangeCooldown[client] = false;
-	}
-	*/
-	
 	return Plugin_Stop;
 }
 
@@ -302,13 +291,13 @@ public Action StoreName(int client, int args)
 		if(forceName)
 		{
 			ReplyToCommand(client, "[Name Manager] Usage: sm_forcename <target> <on/off> - to change force mode on a client");
-			return Plugin_Handled;
 		}
 		else
 		{
 			ReplyToCommand(client, "[Name Manager] Usage: sm_storename <target> <newname>");
-			return Plugin_Handled;
 		}
+		
+		return Plugin_Handled;
 	}
 
 	char argTwo[32];
@@ -404,7 +393,10 @@ public void OnClientCookiesCached(int client)
 	
 	if(g_forceMode == 0)
 	{
+		#if DEBUG
 		PrintToServer("[Name Manager] OnClientCookiesCached Force Mode");
+		#endif
+		
 		return;
 	}
 	
@@ -474,6 +466,7 @@ void ResetClientVariables(int client)
 	g_forceName[client] = false;
 	
 	// Some reason there's an error if we don't check if the timer is valid before deleting when that shouldn't be the case?
+	// probably because it's not initialized as null???
 	
 	if(IsValidHandle(g_checkTimer[client]))
 	{
