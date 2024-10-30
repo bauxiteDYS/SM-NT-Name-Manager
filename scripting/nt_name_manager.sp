@@ -400,7 +400,9 @@ public void OnClientCookiesCached(int client)
 		return;
 	}
 	
+	#if DEBUG
 	PrintToServer("[Name Manager] Cookies Timer");
+	#endif
 	
 	CreateTimer(2.0, CheckNameTimer, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
 }
