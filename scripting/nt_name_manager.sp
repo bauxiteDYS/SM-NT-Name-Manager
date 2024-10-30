@@ -6,6 +6,8 @@
 #pragma semicolon 1
 #pragma newdecls required
 
+#define DEBUG true
+
 Cookie CookiePlayerName;
 Cookie CookieForceName;
 ConVar NameForceBehaviour;
@@ -13,18 +15,26 @@ Handle g_checkTimer[NEO_MAXPLAYERS+1];
 char g_playerNames[NEO_MAXPLAYERS+1][32];
 bool g_cookiesCached[NEO_MAXPLAYERS+1];
 bool g_settingName[NEO_MAXPLAYERS+1];
+bool g_nameChangeCooldown[NEO_MAXPLAYERS+1];
 bool g_checkingTeam[NEO_MAXPLAYERS+1];
 bool g_forceName[NEO_MAXPLAYERS+1];
 bool g_listCooldown;
+bool g_lateLoad;
 int g_forceMode;
 
 public Plugin myinfo = {
 	name = "NT Name Manager",
 	author = "bauxite, credits to Teamkiller324, Glubsy",
-	description = "!forcename, !storename, !shownames, cvar sm_name_force 0/1/2",
-	version = "0.3.7",
+	description = "!storename, !forcename, !shownames, cvar sm_name_force 0/1/2",
+	version = "0.3.9",
 	url = "https://github.com/bauxiteDYS/SM-NT-Name-Manager",
 };
+
+public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
+{
+	g_lateLoad = late;
+	return APLRes_Success;
+}
 
 public void OnPluginStart()	
 {
@@ -38,10 +48,26 @@ public void OnPluginStart()
 	RegAdminCmd("sm_shownames", ShowName, ADMFLAG_GENERIC, "Show current and stored names in console");
 	AddCommandListener(Command_JoinTeam, "jointeam");
 	HookEvent("player_changename", OnPlayerChangeName, EventHookMode_Pre);
+	
+	if(g_lateLoad)
+	{
+		for(int client = 1; client <= MaxClients; client++)
+		{
+			if(IsClientInGame(client))
+			{
+				g_forceMode = NameForceBehaviour.IntValue;
+				OnClientCookiesCached(client);
+			}
+		}
+	}
 }
 
 public Action OnPlayerChangeName(Event event, const char[] name, bool Dontbroadcast)
 {
+	#if DEBUG
+	PrintToServer("[Name Manager] Name Change event");
+	#endif
+	
 	int client = GetClientOfUserId(event.GetInt("userid"));
 	
 	if(client <= 0 || g_forceMode == 0  || !g_cookiesCached[client] || !IsClientInGame(client))
@@ -78,7 +104,7 @@ void NameForceBehaviour_Changed(ConVar convar, const char[] oldValue, const char
 			
 			if(IsValidHandle(g_checkTimer[i]))
 			{
-				CloseHandle(g_checkTimer[i]);
+				delete g_checkTimer[i];
 			}
 			
 			g_checkTimer[i] = CreateTimer(1.0, CheckNameTimer, GetClientUserId(i), TIMER_FLAG_NO_MAPCHANGE);
@@ -109,11 +135,10 @@ public Action CheckTeam(Handle timer, int userid)
 	
 	if(IsValidHandle(g_checkTimer[client]))
 	{
-		CloseHandle(g_checkTimer[client]);
+		delete g_checkTimer[client];
 	}
 	
-	g_checkTimer[client] = CreateTimer(1.0, CheckNameTimer, userid, TIMER_FLAG_NO_MAPCHANGE);
-	
+	g_checkTimer[client] = CreateTimer(2.0, CheckNameTimer, userid, TIMER_FLAG_NO_MAPCHANGE);
 	g_checkingTeam[client] = false;
 	
 	return Plugin_Stop;
@@ -121,9 +146,13 @@ public Action CheckTeam(Handle timer, int userid)
 
 public Action CheckNameTimer(Handle timer, int userid)
 {
+	#if DEBUG
+	PrintToServer("[Name Manager] CheckNameTimer");
+	#endif
+	
 	int client = GetClientOfUserId(userid);
 	
-	if(client <= 0 || g_forceMode == 0 || !IsClientInGame(client) || GetClientTeam(client) <= 0 )
+	if(client <= 0 || g_forceMode == 0 || !IsClientInGame(client) || GetClientTeam(client) <= 0)
 	{
 		return Plugin_Stop;
 	}
@@ -133,37 +162,53 @@ public Action CheckNameTimer(Handle timer, int userid)
 		return Plugin_Stop;
 	}
 	
-	if(g_settingName[client])
+	if(g_nameChangeCooldown[client])
 	{
+		#if DEBUG
+		PrintToServer("[Name Manager] CheckNameTimer, already setting name, creating new timer");
+		#endif
+		
 		if(IsValidHandle(g_checkTimer[client]))
 		{
-			CloseHandle(g_checkTimer[client]);
+			g_checkTimer[client] = null;
 		}
 		
-		g_checkTimer[client] = CreateTimer(3.0, CheckNameTimer, userid, TIMER_FLAG_NO_MAPCHANGE);
+		g_checkTimer[client] = CreateTimer(5.0, CheckNameTimer, userid, TIMER_FLAG_NO_MAPCHANGE);
 		
 		return Plugin_Stop;
 	}
 	
-	g_settingName[client] = true;
-		
+	g_nameChangeCooldown[client] = true;
+	
 	char bufName[32];
 	GetClientName(client, bufName, sizeof(bufName));
 	
+	#if DEBUG
+	PrintToServer("[Name Manager] CheckNameTimer: %s : %s", bufName, g_playerNames[client]);
+	#endif
+	
+	CreateTimer(3.0, SetNameTimer, userid, TIMER_FLAG_NO_MAPCHANGE);
+	
+	/*
 	if(!StrEqual(bufName, g_playerNames[client]))
 	{
 		CreateTimer(3.0, SetNameTimer, userid, TIMER_FLAG_NO_MAPCHANGE);
 	}
 	else
 	{
-		g_settingName[client] = false;
+		g_nameChangeCooldown[client] = false;
 	}
+	*/
 	
 	return Plugin_Stop;
 }
 
 public Action SetNameTimer(Handle timer, int userid)
 {
+	#if DEBUG
+	PrintToServer("[Name Manager] SetNameTimer");
+	#endif
+		
 	int client = GetClientOfUserId(userid);
 	
 	if(client <= 0 || !IsClientInGame(client) || GetClientTeam(client) <= 0)
@@ -171,11 +216,12 @@ public Action SetNameTimer(Handle timer, int userid)
 		return Plugin_Stop;
 	}
 	
+	g_settingName[client] = true;
 	SetClientName(client, g_playerNames[client]);
-	CreateTimer(1.0, ResetNameBool, userid, TIMER_FLAG_NO_MAPCHANGE);
+	CreateTimer(2.0, ResetNameChangeCooldown, userid, TIMER_FLAG_NO_MAPCHANGE);
+	CreateTimer(0.5, ResetNameBool, userid, TIMER_FLAG_NO_MAPCHANGE);
 	return Plugin_Stop;
 }
-
 public Action ResetNameBool(Handle timer, int userid)
 {
 	int client = GetClientOfUserId(userid);
@@ -186,6 +232,19 @@ public Action ResetNameBool(Handle timer, int userid)
 	}
 	
 	g_settingName[client] = false;
+	return Plugin_Stop;
+}
+
+public Action ResetNameChangeCooldown(Handle timer, int userid)
+{
+	int client = GetClientOfUserId(userid);
+	
+	if(client <= 0)
+	{
+		return Plugin_Stop;
+	}
+	
+	g_nameChangeCooldown[client] = false;
 	return Plugin_Stop;
 }
 
@@ -276,7 +335,6 @@ public Action StoreName(int client, int args)
 		if(StrEqual(argTwo, "on", false))
 		{
 			SetClientCookie(target, CookieForceName, "1");
-			g_forceName[target] = true;
 		}
 		else if(StrEqual(argTwo, "off", false))
 		{
@@ -300,7 +358,7 @@ public Action StoreName(int client, int args)
 		return Plugin_Handled;
 	}
 	
-	CreateTimer(1.0, CheckCookieTimer, GetClientUserId(target), TIMER_FLAG_NO_MAPCHANGE);
+	CreateTimer(2.0, CheckCookieTimer, GetClientUserId(target), TIMER_FLAG_NO_MAPCHANGE);
 	
 	return Plugin_Continue;
 }
@@ -320,6 +378,10 @@ public Action CheckCookieTimer(Handle timer, int userid)
 
 public void OnClientCookiesCached(int client)
 {
+	#if DEBUG
+	PrintToServer("[Name Manager] OnClientCookiesCached");
+	#endif
+	
 	char bufName[32];
 	char forceName[2];
 	
@@ -342,14 +404,21 @@ public void OnClientCookiesCached(int client)
 	
 	if(g_forceMode == 0)
 	{
+		PrintToServer("[Name Manager] OnClientCookiesCached Force Mode");
 		return;
 	}
 	
-	CreateTimer(1.0, CheckNameTimer, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
+	PrintToServer("[Name Manager] Cookies Timer");
+	
+	CreateTimer(2.0, CheckNameTimer, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public void OnClientSettingsChanged(int client)	
 {
+	#if DEBUG
+	PrintToServer("[Name Manager] OnClientSettingsChanged");
+	#endif
+	
 	if(!IsClientInGame(client))
 	{
 		return;
@@ -362,6 +431,15 @@ public void OnClientSettingsChanged(int client)
 	
 	if(g_forceMode == 1 && !g_forceName[client])
 	{
+		return;
+	}
+	
+	if(g_settingName[client])
+	{
+		#if DEBUG
+		PrintToServer("[Name Manager] OnClientSettingsChanged, already setting name");
+		#endif
+		
 		return;
 	}
 	
@@ -390,12 +468,15 @@ void ResetClientVariables(int client)
 {
 	g_playerNames[client][0] = '\0';
 	g_cookiesCached[client] = false;
+	g_nameChangeCooldown[client] = false;
 	g_settingName[client] = false;
 	g_checkingTeam[client] = false;
 	g_forceName[client] = false;
 	
+	// Some reason there's an error if we don't check if the timer is valid before deleting when that shouldn't be the case?
+	
 	if(IsValidHandle(g_checkTimer[client]))
 	{
-		CloseHandle(g_checkTimer[client]);
+		delete g_checkTimer[client];
 	}
 }
