@@ -1,27 +1,28 @@
 #include <sourcemod>
 #include <sdktools>
 #include <clientprefs>
+#include <neotokyo>
 
 #pragma semicolon 1
 #pragma newdecls required
 
-
-Handle CookiePlayerName;
-Handle CookieForceName;
+Cookie CookiePlayerName;
+Cookie CookieForceName;
 ConVar NameForceBehaviour;
-char g_playerNames[32+1][32];
-char g_newNames[32+1][32];
-bool g_cookiesCached[32+1];
-bool g_gettingName[32+1];
-bool g_settingName[32+1];
-bool g_forceName[32+1];
+Handle g_checkTimer[NEO_MAXPLAYERS+1];
+char g_playerNames[NEO_MAXPLAYERS+1][32];
+bool g_cookiesCached[NEO_MAXPLAYERS+1];
+bool g_settingName[NEO_MAXPLAYERS+1];
+bool g_checkingTeam[NEO_MAXPLAYERS+1];
+bool g_forceName[NEO_MAXPLAYERS+1];
+bool g_listCooldown;
 int g_forceMode;
 
 public Plugin myinfo = {
 	name = "NT Name Manager",
 	author = "bauxite, credits to Teamkiller324, Glubsy",
 	description = "!forcename, !storename, !shownames, cvar sm_name_force 0/1/2",
-	version = "0.3.6",
+	version = "0.3.7",
 	url = "https://github.com/bauxiteDYS/SM-NT-Name-Manager",
 };
 
@@ -32,8 +33,8 @@ public void OnPluginStart()
 	HookConVarChange(NameForceBehaviour, NameForceBehaviour_Changed);
 	CookiePlayerName = RegClientCookie("Player_Name", "Stores Clients Name", CookieAccess_Private);
 	CookieForceName = RegClientCookie("Force_Name", "Force Name", CookieAccess_Private);
-	RegAdminCmd("sm_storename", StoreName, ADMFLAG_GENERIC, "Stores a clients name, <target> <newname>");
-	RegAdminCmd("sm_forcename", ForceName, ADMFLAG_GENERIC, "Force a clients name, <target> <new name>, or just <target> to remove force");
+	RegAdminCmd("sm_storename", StoreName, ADMFLAG_GENERIC, "Stores a clients name");
+	RegAdminCmd("sm_forcename", StoreName, ADMFLAG_GENERIC, "Force a clients name");
 	RegAdminCmd("sm_shownames", ShowName, ADMFLAG_GENERIC, "Show current and stored names in console");
 	AddCommandListener(Command_JoinTeam, "jointeam");
 	HookEvent("player_changename", OnPlayerChangeName, EventHookMode_Pre);
@@ -43,17 +44,7 @@ public Action OnPlayerChangeName(Event event, const char[] name, bool Dontbroadc
 {
 	int client = GetClientOfUserId(event.GetInt("userid"));
 	
-	if(!IsClientInGame(client) || client <= 0)
-	{
-		return Plugin_Continue;
-	}
-		
-	if(g_forceMode == 0)
-	{
-		return Plugin_Continue;
-	}
-	
-	if(!g_cookiesCached[client])
+	if(client <= 0 || g_forceMode == 0  || !g_cookiesCached[client] || !IsClientInGame(client))
 	{
 		return Plugin_Continue;
 	}
@@ -85,43 +76,49 @@ void NameForceBehaviour_Changed(ConVar convar, const char[] oldValue, const char
 				continue;
 			}
 			
-			CreateTimer(1.0, CheckNameTimer, i, TIMER_FLAG_NO_MAPCHANGE);
+			if(IsValidHandle(g_checkTimer[i]))
+			{
+				CloseHandle(g_checkTimer[i]);
+			}
+			
+			g_checkTimer[i] = CreateTimer(0.5, CheckNameTimer, GetClientUserId(i), TIMER_FLAG_NO_MAPCHANGE);
 		}
 	}
 }
 
 public Action Command_JoinTeam(int client, const char[] command, int argc)
 {
-	if(g_forceMode == 0)
+	if(g_forceMode == 0 || g_checkingTeam[client] || !IsClientInGame(client))
 	{
 		return Plugin_Continue;
 	}
 	
-	if(!IsClientInGame(client))
-	{
-		return Plugin_Continue;
-	}
-	
-	CreateTimer(1.0, CheckTeam, client, TIMER_FLAG_NO_MAPCHANGE);
-	
+	g_checkingTeam[client] = true;
+	CreateTimer(0.5, CheckTeam, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
 	return Plugin_Continue;
 }
 
-public Action CheckTeam(Handle timer, int client)
+public Action CheckTeam(Handle timer, int userid)
 {
-	if(!IsClientInGame(client) || GetClientTeam(client) <= 0)
+	int client = GetClientOfUserId(userid);
+	
+	if(client <= 0 || !IsClientInGame(client) || GetClientTeam(client) <= 0)
 	{
 		return Plugin_Stop;
 	}
 	
-	CreateTimer(1.0, CheckNameTimer, client, TIMER_FLAG_NO_MAPCHANGE);
+	CreateTimer(0.5, CheckNameTimer, userid, TIMER_FLAG_NO_MAPCHANGE);
+	
+	g_checkingTeam[client] = false;
 	
 	return Plugin_Stop;
 }
 
-public Action CheckNameTimer(Handle timer, int client)
+public Action CheckNameTimer(Handle timer, int userid)
 {
-	if(g_forceMode == 0)
+	int client = GetClientOfUserId(userid);
+	
+	if(client <= 0 || g_forceMode == 0 || !IsClientInGame(client) || GetClientTeam(client) <= 0 )
 	{
 		return Plugin_Stop;
 	}
@@ -131,13 +128,15 @@ public Action CheckNameTimer(Handle timer, int client)
 		return Plugin_Stop;
 	}
 	
-	if(!IsClientInGame(client) || GetClientTeam(client) <= 0)
-	{
-		return Plugin_Stop;
-	}
-	
 	if(g_settingName[client])
 	{
+		if(IsValidHandle(g_checkTimer[client]))
+		{
+			CloseHandle(g_checkTimer[client]);
+		}
+		
+		g_checkTimer[client] = CreateTimer(3.0, CheckNameTimer, userid, TIMER_FLAG_NO_MAPCHANGE);
+		
 		return Plugin_Stop;
 	}
 	
@@ -145,9 +144,10 @@ public Action CheckNameTimer(Handle timer, int client)
 		
 	char bufName[32];
 	GetClientName(client, bufName, sizeof(bufName));
+	
 	if(!StrEqual(bufName, g_playerNames[client]))
 	{
-		CreateTimer(3.0, SetNameTimer, client, TIMER_FLAG_NO_MAPCHANGE);
+		CreateTimer(3.0, SetNameTimer, userid, TIMER_FLAG_NO_MAPCHANGE);
 	}
 	else
 	{
@@ -157,20 +157,29 @@ public Action CheckNameTimer(Handle timer, int client)
 	return Plugin_Stop;
 }
 
-public Action SetNameTimer(Handle timer, int client)
+public Action SetNameTimer(Handle timer, int userid)
 {
-	if(!IsClientInGame(client) || GetClientTeam(client) <= 0)
+	int client = GetClientOfUserId(userid);
+	
+	if(client <= 0 || !IsClientInGame(client) || GetClientTeam(client) <= 0)
 	{
 		return Plugin_Stop;
 	}
 	
 	SetClientName(client, g_playerNames[client]);
-	CreateTimer(1.0, ResetNameBool, client, TIMER_FLAG_NO_MAPCHANGE);
+	CreateTimer(1.0, ResetNameBool, userid, TIMER_FLAG_NO_MAPCHANGE);
 	return Plugin_Stop;
 }
 
-public Action ResetNameBool(Handle timer, int client)
+public Action ResetNameBool(Handle timer, int userid)
 {
+	int client = GetClientOfUserId(userid);
+	
+	if(client <= 0)
+	{
+		return Plugin_Stop;
+	}
+	
 	g_settingName[client] = false;
 	return Plugin_Stop;
 }
@@ -182,6 +191,15 @@ public Action ShowName(int client, int args)
 		return Plugin_Handled;
 	}
 	
+	if(g_listCooldown)
+	{
+		ReplyToCommand(client, "[Name Manager] Cooldown, try again in 5s");
+	}
+	
+	g_listCooldown = true;
+	
+	char buf[32+1];
+	
 	PrintToConsole(client, "============ Player Names ============");
 	PrintToConsole(client, "Current ::: Stored");
 	
@@ -191,85 +209,51 @@ public Action ShowName(int client, int args)
 		{
 			continue;
 		}
-			
-		PrintToConsole(client, "%s ::: %s", g_newNames[i], g_playerNames[i]);
+		
+		GetClientName(i, buf, sizeof(buf));	
+		PrintToConsole(client, "%s ::: %s", buf, g_playerNames[i]);
 	}
 	
 	PrintToConsole(client, "======================================");
 	
+	CreateTimer(5.0, ResetListCooldown, _, TIMER_FLAG_NO_MAPCHANGE);
 	return Plugin_Continue;
 }
 
-public Action ForceName(int client, int args)
+public Action ResetListCooldown(Handle timer)
 {
-	if(args == 0 || args >= 3)
-	{
-		PrintToChat(client, "[Name Manager] Wrong number of arguments: <target> <newname> or <target> to remove force");
-		return Plugin_Handled;
-	}
-	
-	char arg1Target[32];
-	GetCmdArg(1, arg1Target, sizeof(arg1Target));
-	
-	int target = FindTarget(client, arg1Target, true, true);
-	if(target == -1)
-	{
-		ReplyToCommand(client, "[Name Manager] Target not found");
-		return Plugin_Handled;
-	}
-	
-	if(!IsClientInGame(target) || !g_cookiesCached[target])
-	{
-		ReplyToCommand(client, "[Name Manager] Target cookies are not cached or they are not in game, try again later");
-		return Plugin_Handled;
-	}
-	
-	if(args == 1) // toggle instead of remove?
-	{
-		SetClientCookie(target, CookieForceName, "0");
-		g_forceName[target] = false;
-		return Plugin_Handled;
-	}
-	
-	SetClientCookie(target, CookieForceName, "1");
-	
-	char arg2ForceName[32];
-	GetCmdArg(2, arg2ForceName, sizeof(arg2ForceName));
-
-	if(g_settingName[target])
-	{
-		ReplyToCommand(client, "[Name Manager] Already setting name, try again later");
-		return Plugin_Handled;
-	}
-	
-	SetClientCookie(target, CookiePlayerName, arg2ForceName);
-	strcopy(g_playerNames[target], sizeof(g_playerNames[]), arg2ForceName);
-	
-	if(g_forceMode == 0)
-	{
-		return Plugin_Handled;
-	}
-	
-	CreateTimer(1.0, CheckCookieTimer, target, TIMER_FLAG_NO_MAPCHANGE);
-	
-	return Plugin_Continue;
+	g_listCooldown = false;
+	return Plugin_Stop;
 }
 
 public Action StoreName(int client, int args)
 {
+	char cmdName[3 + 1];
+	GetCmdArg(0, cmdName, sizeof(cmdName));
+	char cmdChar = CharToLower(cmdName[3]);
+	bool forceName = cmdChar == 'f' ? true : false;
+	
 	if(args != 2)
 	{
-		PrintToChat(client, "[Name Manager] Wrong number of arguments: <target> <newname>");
-		return Plugin_Handled;
+		if(forceName)
+		{
+			PrintToChat(client, "[Name Manager] Usage: sm_forcename <target> <on/off> - to change force mode on a client");
+			return Plugin_Handled;
+		}
+		else
+		{
+			PrintToChat(client, "[Name Manager] Usage: sm_storename <target> <newname>");
+			return Plugin_Handled;
+		}
 	}
+
+	char argTwo[32];
+	GetCmdArg(2, argTwo, sizeof(argTwo));
 	
-	char arg2ForceName[32];
-	GetCmdArg(2, arg2ForceName, sizeof(arg2ForceName));
+	char argTarget[32];
+	GetCmdArg(1, argTarget, sizeof(argTarget));
 	
-	char arg1Target[32];
-	GetCmdArg(1, arg1Target, sizeof(arg1Target));
-	
-	int target = FindTarget(client, arg1Target, true, true);
+	int target = FindTarget(client, argTarget, true, true);
 	if(target == -1)
 	{
 		ReplyToCommand(client, "[Name Manager] Target not found");
@@ -281,28 +265,46 @@ public Action StoreName(int client, int args)
 		ReplyToCommand(client, "[Name Manager] Target cookies are not cached or they are not in game, try again later");
 		return Plugin_Handled;
 	}
-	
-	if(g_settingName[target])
+
+	if(forceName)
 	{
-		ReplyToCommand(client, "[Name Manager] Already setting name, try again later");
-		return Plugin_Handled;
+		if(StrEqual(argTwo, "on", false))
+		{
+			SetClientCookie(target, CookieForceName, "1");
+			g_forceName[target] = true;
+		}
+		else if(StrEqual(argTwo, "off", false))
+		{
+			SetClientCookie(target, CookieForceName, "0");
+			g_forceName[target] = false;
+			return Plugin_Handled;
+		}
 	}
-	
-	SetClientCookie(target, CookiePlayerName, arg2ForceName);
-	strcopy(g_playerNames[target], sizeof(g_playerNames[]), arg2ForceName);
+	else
+	{
+		SetClientCookie(target, CookiePlayerName, argTwo);
+		strcopy(g_playerNames[target], sizeof(g_playerNames[]), argTwo);
+	}
 	
 	if(g_forceMode == 0)
 	{
 		return Plugin_Handled;
 	}
 	
-	CreateTimer(1.0, CheckCookieTimer, target, TIMER_FLAG_NO_MAPCHANGE);
+	CreateTimer(1.0, CheckCookieTimer, GetClientUserId(target), TIMER_FLAG_NO_MAPCHANGE);
 	
 	return Plugin_Continue;
 }
 
-public Action CheckCookieTimer(Handle timer, int client)
+public Action CheckCookieTimer(Handle timer, int userid)
 {
+	int client = GetClientOfUserId(userid);
+	
+	if(client <= 0)
+	{
+		return Plugin_Stop;
+	}
+	
 	RequestFrame(OnClientCookiesCached, client);
 	return Plugin_Stop;
 }
@@ -334,12 +336,7 @@ public void OnClientCookiesCached(int client)
 		return;
 	}
 	
-	if(g_settingName[client])
-	{
-		return;
-	}
-	
-	CreateTimer(1.0, CheckNameTimer, client, TIMER_FLAG_NO_MAPCHANGE);
+	CreateTimer(1.0, CheckNameTimer, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public void OnClientSettingsChanged(int client)	
@@ -349,23 +346,7 @@ public void OnClientSettingsChanged(int client)
 		return;
 	}
 	
-	if(!g_gettingName[client])
-	{
-		g_gettingName[client] = true;
-		CreateTimer(1.0, GetNewName, client, TIMER_FLAG_NO_MAPCHANGE);
-	}
-	
-	if(g_forceMode == 0)
-	{
-		return;
-	}
-	
-	if(!g_cookiesCached[client])
-	{
-		return;
-	}
-	
-	if(g_settingName[client])
+	if(g_forceMode == 0 || !g_cookiesCached[client])
 	{
 		return;
 	}
@@ -375,25 +356,10 @@ public void OnClientSettingsChanged(int client)
 		return;
 	}
 	
-	CreateTimer(3.0, CheckNameTimer, client, TIMER_FLAG_NO_MAPCHANGE);
-}
-
-public Action GetNewName(Handle Timer, int client)
-{
-	if(!IsClientInGame(client))
+	if(!IsValidHandle(g_checkTimer[client]))
 	{
-		return Plugin_Stop;
+		g_checkTimer[client] = CreateTimer(3.0, CheckNameTimer, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
 	}
-	
-	GetClientName(client, g_newNames[client], sizeof(g_newNames));
-	CreateTimer(1.0, ResetNewNameBool, client, TIMER_FLAG_NO_MAPCHANGE);
-	return Plugin_Stop;
-}
-
-public Action ResetNewNameBool(Handle Timer, int client)
-{
-	g_gettingName[client] = false;
-	return Plugin_Stop;
 }
 
 public void OnClientDisconnect_Post(int client)
@@ -407,15 +373,20 @@ public void OnMapEnd()
 	{
 		ResetClientVariables(client);
 	}
+	
+	g_listCooldown = false;
 }
 
 void ResetClientVariables(int client)
 {
 	g_playerNames[client][0] = '\0';
-	g_newNames[client][0] = '\0';
 	g_cookiesCached[client] = false;
-	g_gettingName[client] = false;
 	g_settingName[client] = false;
+	g_checkingTeam[client] = false;
 	g_forceName[client] = false;
-	PrintToServer("reset player variables");
+	
+	if(IsValidHandle(g_checkTimer[client]))
+	{
+		CloseHandle(g_checkTimer[client]);
+	}
 }
