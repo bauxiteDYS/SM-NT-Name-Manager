@@ -94,7 +94,7 @@ public Action Command_JoinTeam(int client, const char[] command, int argc)
 	}
 	
 	g_checkingTeam[client] = true;
-	CreateTimer(0.5, CheckTeam, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
+	CreateTimer(1.0, CheckTeam, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
 	return Plugin_Continue;
 }
 
@@ -107,7 +107,12 @@ public Action CheckTeam(Handle timer, int userid)
 		return Plugin_Stop;
 	}
 	
-	CreateTimer(0.5, CheckNameTimer, userid, TIMER_FLAG_NO_MAPCHANGE);
+	if(IsValidHandle(g_checkTimer[client]))
+	{
+		CloseHandle(g_checkTimer[client]);
+	}
+	
+	g_checkTimer[client] = CreateTimer(1.0, CheckNameTimer, userid, TIMER_FLAG_NO_MAPCHANGE);
 	
 	g_checkingTeam[client] = false;
 	
@@ -228,9 +233,11 @@ public Action ResetListCooldown(Handle timer)
 
 public Action StoreName(int client, int args)
 {
-	char cmdName[3 + 1];
+	char cmdName[12 + 1];
 	GetCmdArg(0, cmdName, sizeof(cmdName));
 	char cmdChar = CharToLower(cmdName[3]);
+	PrintToServer("char %c", cmdChar);
+	
 	bool forceName = cmdChar == 'f' ? true : false;
 	
 	if(args != 2)
@@ -277,6 +284,10 @@ public Action StoreName(int client, int args)
 		{
 			SetClientCookie(target, CookieForceName, "0");
 			g_forceName[target] = false;
+			return Plugin_Handled;
+		}
+		else
+		{
 			return Plugin_Handled;
 		}
 	}
