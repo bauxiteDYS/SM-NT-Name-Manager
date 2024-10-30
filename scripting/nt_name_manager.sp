@@ -6,7 +6,7 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-#define DEBUG true
+#define DEBUG false
 
 Cookie CookiePlayerName;
 Cookie CookieForceName;
