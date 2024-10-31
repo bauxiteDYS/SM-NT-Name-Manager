@@ -39,7 +39,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 public void OnPluginStart()	
 {
 	LoadTranslations("common.phrases");
-	NameForceBehaviour = CreateConVar("sm_name_force", "1", "0 - Off; 1 - Forced name for specific clients; 2 - Forced name for all clients", _, true, 0.0, true, 2.0);
+	NameForceBehaviour = CreateConVar("sm_name_force", "1", "0 - Off, 1 - Forced name for specific clients, 2 - Forced name for all clients", _, true, 0.0, true, 2.0);
 	HookConVarChange(NameForceBehaviour, NameForceBehaviour_Changed);
 	CookiePlayerName = RegClientCookie("Player_Name", "Stores Clients Name", CookieAccess_Private);
 	CookieForceName = RegClientCookie("Force_Name", "Force Name", CookieAccess_Private);
@@ -267,14 +267,26 @@ public Action ResetNameChangeCooldown(Handle timer, int userid)
 
 public Action ShowName(int client, int args)
 {
-	if(client <= 0 || !IsClientInGame(client))
+	if(client <= 0)
 	{
 		return Plugin_Handled;
+	}
+	
+	RequestFrame(PrintNamesInConsole, client);
+	return Plugin_Handled;
+}
+
+void PrintNamesInConsole(int client)
+{
+	if(client <= 0 || !IsClientInGame(client))
+	{
+		return;
 	}
 	
 	if(g_listCooldown)
 	{
 		ReplyToCommand(client, "[Name Manager] Cooldown, try again in 5s");
+		return;
 	}
 	
 	g_listCooldown = true;
@@ -298,7 +310,6 @@ public Action ShowName(int client, int args)
 	PrintToConsole(client, "======================================");
 	
 	CreateTimer(5.0, ResetListCooldown, _, TIMER_FLAG_NO_MAPCHANGE);
-	return Plugin_Continue;
 }
 
 public Action ResetListCooldown(Handle timer)
