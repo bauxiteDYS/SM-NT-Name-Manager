@@ -39,7 +39,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 public void OnPluginStart()	
 {
 	LoadTranslations("common.phrases");
-	NameForceBehaviour = CreateConVar("sm_name_force", "1", "0 off, 1 for forced, 2 all clients", _, true, 0.0, true, 2.0);
+	NameForceBehaviour = CreateConVar("sm_name_force", "1", "0 - Off; 1 - Forced name for specific clients; 2 - Forced name for all clients", _, true, 0.0, true, 2.0);
 	HookConVarChange(NameForceBehaviour, NameForceBehaviour_Changed);
 	CookiePlayerName = RegClientCookie("Player_Name", "Stores Clients Name", CookieAccess_Private);
 	CookieForceName = RegClientCookie("Force_Name", "Force Name", CookieAccess_Private);
@@ -48,6 +48,9 @@ public void OnPluginStart()
 	RegAdminCmd("sm_shownames", ShowName, ADMFLAG_GENERIC, "Show current and stored names in console");
 	AddCommandListener(Command_JoinTeam, "jointeam");
 	HookEvent("player_changename", OnPlayerChangeName, EventHookMode_Pre);
+	HookEvent("game_round_start", OnRoundStartPost, EventHookMode_Post);
+	
+	AutoExecConfig(true);
 	
 	if(g_lateLoad)
 	{
@@ -83,6 +86,31 @@ public Action OnPlayerChangeName(Event event, const char[] name, bool Dontbroadc
 	}
 	
 	return Plugin_Continue;
+}
+
+public void OnRoundStartPost(Event event, const char[] name, bool dontBroadcast)
+{
+	RequestFrame(CheckNameRoundStart, event.GetInt("userid"));
+}
+
+void CheckNameRoundStart(int userid)
+{
+	int client = GetClientOfUserId(userid);
+	
+	if(client <= 0 || g_forceMode == 0  || !g_cookiesCached[client] || !IsClientInGame(client))
+	{
+		return;
+	}
+	
+	if(g_forceMode == 2 || (g_forceMode == 1 && g_forceName[client]))
+	{
+		if(IsValidHandle(g_checkTimer[client]))
+		{
+			delete g_checkTimer[client];
+		}
+	
+		g_checkTimer[client] = CreateTimer(2.0, CheckNameTimer, userid, TIMER_FLAG_NO_MAPCHANGE);
+	}
 }
 
 public void OnConfigsExecuted()
@@ -413,12 +441,7 @@ public void OnClientSettingsChanged(int client)
 	PrintToServer("[Name Manager] OnClientSettingsChanged");
 	#endif
 	
-	if(!IsClientInGame(client))
-	{
-		return;
-	}
-	
-	if(g_forceMode == 0 || !g_cookiesCached[client])
+	if(g_forceMode == 0 || !g_cookiesCached[client] || !IsClientInGame(client))
 	{
 		return;
 	}
