@@ -1,7 +1,7 @@
 # SM-NT-Name-Manager - Sort of experimental.
 Sourcemod Plugin for Neotokyo that stores a default name for every client, can automatically change to that name to prevent fake-nicks. Supports automatically renaming all clients or only specific ones using the `sm_forcename` command.
 
-`sm_storename` : Store a default name for a client.   
+`sm_storename` : Override a stored name for a client, the plugin will store the first name a client joins with as the default name.   
 Usage: `sm_storename <target_client> <new_name>`  
 
 `sm_forcename` : Turn on/off the forced rename on a client.   
