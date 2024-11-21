@@ -41,8 +41,8 @@ public void OnPluginStart()
 	LoadTranslations("common.phrases");
 	NameForceBehaviour = CreateConVar("sm_name_force", "1", "0 - Off, 1 - Forced name for specific clients, 2 - Forced name for all clients", _, true, 0.0, true, 2.0);
 	HookConVarChange(NameForceBehaviour, NameForceBehaviour_Changed);
-	CookiePlayerName = RegClientCookie("Player_Name", "Stores Clients Name", CookieAccess_Private);
-	CookieForceName = RegClientCookie("Force_Name", "Force Name", CookieAccess_Private);
+	CookiePlayerName = RegClientCookie("Name_Manager_Player_Name", "Stores Clients Name", CookieAccess_Private);
+	CookieForceName = RegClientCookie("Name_Manager_Force_Name", "Force Name", CookieAccess_Private);
 	RegAdminCmd("sm_storename", StoreName, ADMFLAG_GENERIC, "Stores a clients name");
 	RegAdminCmd("sm_forcename", StoreName, ADMFLAG_GENERIC, "Force a clients name");
 	RegAdminCmd("sm_shownames", ShowName, ADMFLAG_GENERIC, "Show current and stored names in console");
