@@ -26,7 +26,7 @@ public Plugin myinfo = {
 	name = "NT Name Manager",
 	author = "bauxite, credits to Teamkiller324, Glubsy",
 	description = "!storename, !forcename, !shownames, cvar sm_name_force 0/1/2",
-	version = "0.3.9",
+	version = "0.5.0",
 	url = "https://github.com/bauxiteDYS/SM-NT-Name-Manager",
 };
 
@@ -329,7 +329,8 @@ public Action StoreName(int client, int args)
 	{
 		if(forceName)
 		{
-			ReplyToCommand(client, "[Name Manager] Usage: sm_forcename <target> <on/off> - to change force mode on a client");
+			ReplyToCommand(client, "[Name Manager] Usage: sm_forcename <target> <new name> to force a new name on a client");
+			ReplyToCommand(client, "[Name Manager] Usage: sm_forcename <target> <on || 1> || <off || 0> - to change force mode on a client");
 		}
 		else
 		{
@@ -360,11 +361,12 @@ public Action StoreName(int client, int args)
 
 	if(forceName)
 	{
-		if(StrEqual(argTwo, "on", false))
+		if(StrEqual(argTwo, "on", false) || StrEqual(argTwo, "1", false))
 		{
 			SetClientCookie(target, CookieForceName, "1");
+			return Plugin_Handled;
 		}
-		else if(StrEqual(argTwo, "off", false))
+		else if(StrEqual(argTwo, "off", false) || StrEqual(argTwo, "0", false))
 		{
 			SetClientCookie(target, CookieForceName, "0");
 			g_forceName[target] = false;
@@ -372,7 +374,9 @@ public Action StoreName(int client, int args)
 		}
 		else
 		{
-			return Plugin_Handled;
+			SetClientCookie(target, CookiePlayerName, argTwo);
+			SetClientCookie(target, CookieForceName, "1");
+			strcopy(g_playerNames[target], sizeof(g_playerNames[]), argTwo);
 		}
 	}
 	else
