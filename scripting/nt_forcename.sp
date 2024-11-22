@@ -39,7 +39,6 @@ public void OnPluginStart()
 	AddCommandListener(Command_JoinTeam, "jointeam");
 	HookEvent("player_changename", OnPlayerChangeName, EventHookMode_Pre);
 	HookEvent("game_round_start", OnRoundStartPost, EventHookMode_Post);
-	AutoExecConfig(true);
 
 	if(g_lateLoad)
 	{	
