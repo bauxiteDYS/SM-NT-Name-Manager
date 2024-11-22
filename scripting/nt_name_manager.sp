@@ -26,7 +26,7 @@ public Plugin myinfo = {
 	name = "NT Name Manager",
 	author = "bauxite, credits to Teamkiller324, Glubsy",
 	description = "!storename, !forcename, !shownames, cvar sm_name_force 0/1/2",
-	version = "0.5.0",
+	version = "0.5.1",
 	url = "https://github.com/bauxiteDYS/SM-NT-Name-Manager",
 };
 
@@ -41,10 +41,11 @@ public void OnPluginStart()
 	LoadTranslations("common.phrases");
 	NameForceBehaviour = CreateConVar("sm_name_force", "1", "0 - Off, 1 - Forced name for specific clients, 2 - Forced name for all clients", _, true, 0.0, true, 2.0);
 	HookConVarChange(NameForceBehaviour, NameForceBehaviour_Changed);
-	CookiePlayerName = RegClientCookie("Name_Manager_Player_Name", "Stores Clients Name", CookieAccess_Private);
-	CookieForceName = RegClientCookie("Name_Manager_Force_Name", "Force Name", CookieAccess_Private);
+	CookiePlayerName = RegClientCookie("NM_PlayerName", "Stores Clients Name", CookieAccess_Private);
+	CookieForceName = RegClientCookie("NM_ForceName", "Force Name", CookieAccess_Private);
 	RegAdminCmd("sm_storename", StoreName, ADMFLAG_GENERIC, "Stores a clients name");
 	RegAdminCmd("sm_forcename", StoreName, ADMFLAG_GENERIC, "Force a clients name");
+	RegAdminCmd("sm_unforcename", StoreName, ADMFLAG_GENERIC, "Unforce a clients name");
 	RegAdminCmd("sm_shownames", ShowName, ADMFLAG_GENERIC, "Show current and stored names in console");
 	AddCommandListener(Command_JoinTeam, "jointeam");
 	HookEvent("player_changename", OnPlayerChangeName, EventHookMode_Pre);
@@ -157,8 +158,14 @@ public Action CheckTeam(Handle timer, int userid)
 {
 	int client = GetClientOfUserId(userid);
 	
-	if(client <= 0 || !IsClientInGame(client) || GetClientTeam(client) <= 0)
+	if(client <= 0 || !IsClientInGame(client))
 	{
+		return Plugin_Stop;
+	}
+	
+	if(GetClientTeam(client) <= 0)
+	{
+		g_checkingTeam[client] = false;
 		return Plugin_Stop;
 	}
 	
@@ -186,8 +193,10 @@ public Action CheckNameTimer(Handle timer, int userid)
 		return Plugin_Stop;
 	}
 	
-	if(g_forceMode == 1 && !g_forceName[client])
+	if(GetClientTeam(client) <= 0 || (g_forceMode == 1 && !g_forceName[client]))
 	{
+		g_settingName[client] = false;
+		g_nameChangeCooldown[client] = false;
 		return Plugin_Stop;
 	}
 	
@@ -207,15 +216,13 @@ public Action CheckNameTimer(Handle timer, int userid)
 		return Plugin_Stop;
 	}
 	
-	g_nameChangeCooldown[client] = true;
-	
+	#if DEBUG
 	char bufName[32];
 	GetClientName(client, bufName, sizeof(bufName));
-	
-	#if DEBUG
 	PrintToServer("[Name Manager] CheckNameTimer: %s : %s", bufName, g_playerNames[client]);
 	#endif
 	
+	g_nameChangeCooldown[client] = true;
 	CreateTimer(3.0, SetNameTimer, userid, TIMER_FLAG_NO_MAPCHANGE);
 	return Plugin_Stop;
 }
@@ -228,15 +235,22 @@ public Action SetNameTimer(Handle timer, int userid)
 		
 	int client = GetClientOfUserId(userid);
 	
-	if(client <= 0 || !IsClientInGame(client) || GetClientTeam(client) <= 0)
+	if(client <= 0 || !IsClientInGame(client))
 	{
+		return Plugin_Stop;
+	}
+	
+	if(GetClientTeam(client) <= 0 || (g_forceMode == 1 && !g_forceName[client]))
+	{
+		g_settingName[client] = false;
+		g_nameChangeCooldown[client] = false;
 		return Plugin_Stop;
 	}
 	
 	g_settingName[client] = true;
 	SetClientName(client, g_playerNames[client]);
-	CreateTimer(2.0, ResetNameChangeCooldown, userid, TIMER_FLAG_NO_MAPCHANGE);
 	CreateTimer(0.5, ResetNameBool, userid, TIMER_FLAG_NO_MAPCHANGE);
+	CreateTimer(2.0, ResetNameChangeCooldown, userid, TIMER_FLAG_NO_MAPCHANGE);
 	return Plugin_Stop;
 }
 public Action ResetNameBool(Handle timer, int userid)
@@ -323,25 +337,34 @@ public Action StoreName(int client, int args)
 	char cmdName[4 + 1];
 	GetCmdArg(0, cmdName, sizeof(cmdName));
 	char cmdChar = CharToLower(cmdName[3]);
+	bool storeName = cmdChar == 's' ? true : false;
 	bool forceName = cmdChar == 'f' ? true : false;
+	bool unforce = cmdChar == 'u' ? true : false;
 	
-	if(args != 2)
+	if(forceName && args != 2)
 	{
-		if(forceName)
-		{
-			ReplyToCommand(client, "[Name Manager] Usage: sm_forcename <target> <new name> to force a new name on a client");
-			ReplyToCommand(client, "[Name Manager] Usage: sm_forcename <target> <on || 1> || <off || 0> - to change force mode on a client");
-		}
-		else
-		{
-			ReplyToCommand(client, "[Name Manager] Usage: sm_storename <target> <newname>");
-		}
-		
+		ReplyToCommand(client, "[Name Manager] Usage: sm_forcename <target> <new name> to force a new name on a client");
+		ReplyToCommand(client, "[Name Manager] Usage: sm_forcename <target> <on | 1> to enable forced name on a client");
+		return Plugin_Handled;
+	}
+	
+	if(storeName && args != 2)
+	{
+		ReplyToCommand(client, "[Name Manager] Usage: sm_storename <target> <newname>");
+		return Plugin_Handled;
+	}
+	
+	if(unforce && args != 1)
+	{
+		ReplyToCommand(client, "[Name Manager] Usage: sm_unforcename <target>");
 		return Plugin_Handled;
 	}
 
 	char argTwo[32];
-	GetCmdArg(2, argTwo, sizeof(argTwo));
+	if(!unforce)
+	{
+		GetCmdArg(2, argTwo, sizeof(argTwo));
+	}
 	
 	char argTarget[32];
 	GetCmdArg(1, argTarget, sizeof(argTarget));
@@ -358,19 +381,19 @@ public Action StoreName(int client, int args)
 		ReplyToCommand(client, "[Name Manager] Target cookies are not cached or they are not in game, try again later");
 		return Plugin_Handled;
 	}
-
+	
+	if(unforce)
+	{
+		SetClientCookie(target, CookieForceName, "0");
+		g_forceName[target] = false;
+		return Plugin_Handled;
+	}
+	
 	if(forceName)
 	{
 		if(StrEqual(argTwo, "on", false) || StrEqual(argTwo, "1", false))
 		{
 			SetClientCookie(target, CookieForceName, "1");
-			return Plugin_Handled;
-		}
-		else if(StrEqual(argTwo, "off", false) || StrEqual(argTwo, "0", false))
-		{
-			SetClientCookie(target, CookieForceName, "0");
-			g_forceName[target] = false;
-			return Plugin_Handled;
 		}
 		else
 		{
@@ -379,7 +402,8 @@ public Action StoreName(int client, int args)
 			strcopy(g_playerNames[target], sizeof(g_playerNames[]), argTwo);
 		}
 	}
-	else
+	
+	if(storeName)
 	{
 		SetClientCookie(target, CookiePlayerName, argTwo);
 		strcopy(g_playerNames[target], sizeof(g_playerNames[]), argTwo);
@@ -414,6 +438,8 @@ public void OnClientCookiesCached(int client)
 	PrintToServer("[Name Manager] OnClientCookiesCached");
 	#endif
 	
+	g_cookiesCached[client] = true;
+	
 	char bufName[32];
 	char forceName[2];
 	
@@ -431,8 +457,6 @@ public void OnClientCookiesCached(int client)
 		SetClientCookie(client, CookiePlayerName, bufName);
 		strcopy(g_playerNames[client], sizeof(g_playerNames[]), bufName);
 	}
-	
-	g_cookiesCached[client] = true;
 	
 	if(g_forceMode == 0)
 	{
