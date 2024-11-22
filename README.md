@@ -1,5 +1,5 @@
 # SM-NT-Force-Name.
-Sourcemod Plugin for Neotokyo that forces a specific name on a client, branch of the nt_name_manager plugin.
+Sourcemod Plugin for Neotokyo that forces a specific name on a client, branch of the nt_name_manager plugin. Do not use both at the same time.
 
 **Usage:**  
 - `sm_forcename <target_client> <new_name>` to force a new name on a client.  
