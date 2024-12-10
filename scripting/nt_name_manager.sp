@@ -26,7 +26,7 @@ public Plugin myinfo = {
 	name = "NT Name Manager",
 	author = "bauxite, credits to Teamkiller324, Glubsy",
 	description = "!storename, !forcename, !shownames, cvar sm_name_force 0/1/2",
-	version = "0.5.1",
+	version = "0.5.3",
 	url = "https://github.com/bauxiteDYS/SM-NT-Name-Manager",
 };
 
@@ -341,10 +341,10 @@ public Action StoreName(int client, int args)
 	bool forceName = cmdChar == 'f' ? true : false;
 	bool unforce = cmdChar == 'u' ? true : false;
 	
-	if(forceName && args != 2)
+	if(forceName && (args != 2 || args != 1))
 	{
 		ReplyToCommand(client, "[Name Manager] Usage: sm_forcename <target> <new name> to force a new name on a client");
-		ReplyToCommand(client, "[Name Manager] Usage: sm_forcename <target> <on | 1> to enable forced name on a client");
+		ReplyToCommand(client, "[Name Manager] Usage: sm_forcename <target> to enable forced name on a client");
 		return Plugin_Handled;
 	}
 	
@@ -361,7 +361,7 @@ public Action StoreName(int client, int args)
 	}
 
 	char argTwo[32];
-	if(!unforce)
+	if(args == 2)
 	{
 		GetCmdArg(2, argTwo, sizeof(argTwo));
 	}
@@ -391,7 +391,7 @@ public Action StoreName(int client, int args)
 	
 	if(forceName)
 	{
-		if(StrEqual(argTwo, "on", false) || StrEqual(argTwo, "1", false))
+		if(args == 1)
 		{
 			SetClientCookie(target, CookieForceName, "1");
 		}
