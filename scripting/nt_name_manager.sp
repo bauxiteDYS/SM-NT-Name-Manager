@@ -26,7 +26,7 @@ public Plugin myinfo = {
 	name = "NT Name Manager",
 	author = "bauxite, credits to Teamkiller324, Glubsy",
 	description = "!storename, !forcename, !shownames, cvar sm_name_force 0/1/2",
-	version = "0.5.5",
+	version = "0.5.6",
 	url = "https://github.com/bauxiteDYS/SM-NT-Name-Manager",
 };
 
@@ -59,6 +59,11 @@ public void OnPluginStart()
 		
 		for(int client = 1; client <= MaxClients; client++)
 		{
+			if(IsFakeClient(client))
+			{
+				continue;
+			}
+			
 			if(IsClientInGame(client))
 			{
 				OnClientCookiesCached(client);
@@ -75,7 +80,7 @@ public Action OnPlayerChangeName(Event event, const char[] name, bool Dontbroadc
 	
 	int client = GetClientOfUserId(event.GetInt("userid"));
 	
-	if(client <= 0 || g_forceMode == 0  || !g_cookiesCached[client] || !IsClientInGame(client))
+	if(client <= 0 || g_forceMode == 0  || !g_cookiesCached[client] || !IsClientInGame(client) || IsFakeClient(client))
 	{
 		return Plugin_Continue;
 	}
@@ -98,7 +103,7 @@ void CheckNameRoundStart(int userid)
 {
 	int client = GetClientOfUserId(userid);
 	
-	if(client <= 0 || g_forceMode == 0  || !g_cookiesCached[client] || !IsClientInGame(client))
+	if(client <= 0 || g_forceMode == 0  || !g_cookiesCached[client] || !IsClientInGame(client) || IsFakeClient(client))
 	{
 		return;
 	}
@@ -127,7 +132,7 @@ void NameForceBehaviour_Changed(ConVar convar, const char[] oldValue, const char
 	{
 		for(int i = 1; i <= MaxClients; i++)
 		{
-			if(!IsClientInGame(i) || GetClientTeam(i) <= 0)
+			if(!IsClientInGame(i) || GetClientTeam(i) <= 0 || IsFakeClient(i))
 			{
 				continue;
 			}
@@ -144,7 +149,7 @@ void NameForceBehaviour_Changed(ConVar convar, const char[] oldValue, const char
 
 public Action Command_JoinTeam(int client, const char[] command, int argc)
 {
-	if(g_forceMode == 0 || g_checkingTeam[client] || !IsClientInGame(client))
+	if(g_forceMode == 0 || g_checkingTeam[client] || !IsClientInGame(client) || IsFakeClient(client))
 	{
 		return Plugin_Continue;
 	}
@@ -438,6 +443,11 @@ public void OnClientCookiesCached(int client)
 	PrintToServer("[Name Manager] OnClientCookiesCached");
 	#endif
 	
+	if(IsFakeClient(client))
+	{
+		return;
+	}
+	
 	g_cookiesCached[client] = true;
 	
 	char bufName[32];
@@ -480,7 +490,7 @@ public void OnClientSettingsChanged(int client)
 	PrintToServer("[Name Manager] OnClientSettingsChanged");
 	#endif
 	
-	if(g_forceMode == 0 || !g_cookiesCached[client] || !IsClientInGame(client))
+	if(g_forceMode == 0 || !g_cookiesCached[client] || !IsClientInGame(client) || IsFakeClient(client))
 	{
 		return;
 	}
