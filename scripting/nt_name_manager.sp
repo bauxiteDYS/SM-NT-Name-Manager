@@ -8,11 +8,12 @@
 
 #define DEBUG true
 
-Database hDB;
+Database hDB = null;
 
 bool g_cookiesCached[NEO_MAXPLAYERS+1];
 bool g_forceName[NEO_MAXPLAYERS+1];
 char g_playerNames[NEO_MAXPLAYERS+1][32];
+char g_steamID[NEO_MAXPLAYERS+1][32];
 
 ConVar NameForceBehaviour;
 Handle g_checkTimer[NEO_MAXPLAYERS+1];
@@ -43,9 +44,8 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 public void OnPluginStart()	
 {
 	LoadTranslations("common.phrases");
-	NameForceBehaviour = CreateConVar("sm_name_force", "1", "0 - Off, 1 - Forced name for specific clients, 2 - Forced name for all clients", _, true, 0.0, true, 2.0);
+	NameForceBehaviour = CreateConVar("sm_name_force", "2", "0 - Off, 1 - Forced name for specific clients, 2 - Forced name for all clients", _, true, 0.0, true, 2.0);
 	HookConVarChange(NameForceBehaviour, NameForceBehaviour_Changed);
-
 	RegAdminCmd("sm_storename", StoreName, ADMFLAG_GENERIC, "Stores a clients name");
 	RegAdminCmd("sm_forcename", StoreName, ADMFLAG_GENERIC, "Force a clients name");
 	RegAdminCmd("sm_unforcename", StoreName, ADMFLAG_GENERIC, "Unforce a clients name");
@@ -69,31 +69,66 @@ public void OnPluginStart()
 			
 			if(IsClientInGame(client))
 			{
-				//OnClientCookiesCached(client);
-				OnClientPutInServer(client);
+				ProcessClient(GetClientUserId(client));
 			}
 		}
+	}
+}
+
+public void OnMapInit()
+{
+	Database.Connect(DB_Connect); // default connection I guess
+}
+
+public void DB_Connect(Database db, const char[] error, any data)
+{
+	// we need to detect what driver we are using mysql or sqlite
+	// also adjust the insert queries accordingly
+	
+	if (db == null)
+	{
+		LogError("%s Default Database connection failure: %s", g_tag, error);
+		DB_init();
+	} 
+	else 
+	{
+		hDB = db;
+		DB_init();
 	}
 }
 
 public void OnConfigsExecuted()
 {
 	g_forceMode = NameForceBehaviour.IntValue;
-	
-	DB_init();
 }
 
-public void OnClientPutInServer(int client)
+public void OnClientAuthorized(int client, const char[] auth)
 {
 	if(IsFakeClient(client))
 	{
 		return;
 	}
 	
-	int userid = GetClientUserId(client);
+	RequestFrame(ProcessClient, GetClientUserId(client));
+}
+
+void ProcessClient(int userid)
+{
+	#if DEBUG
+	PrintToServer("%s processing client", g_tag);
+	#endif
 	
-	if(userid <= 0)
+	int client = GetClientOfUserId(userid);
+	
+	if(client <= 0 || client > MaxClients)
 	{
+		PrintToServer("%s error processing client", g_tag);
+		return;
+	}
+	
+	if(!GetClientAuthId(client, AuthId_SteamID64, g_steamID[client], sizeof(g_steamID[])))
+	{
+		LogError("%s Error getting SteamID", g_tag);
 		return;
 	}
 	
@@ -103,11 +138,22 @@ public void OnClientPutInServer(int client)
 void DB_init()
 {
 	char error[255];
-	hDB = SQLite_UseDatabase("nt_name_manager", error, sizeof(error));
-
-	if(hDB == INVALID_HANDLE)
+	
+	if(hDB == null)
 	{
-		SetFailState("%s SQL error: %s", g_tag, error);
+		#if DEBUG
+		PrintToServer("%s Using SQLite since mysql not found", g_tag);
+		#endif
+		hDB = SQLite_UseDatabase("nt_name_manager", error, sizeof(error));
+	}
+
+	if(hDB == INVALID_HANDLE || hDB == null)
+	{
+		#if DEBUG
+		PrintToServer("%s ERROR NO DATABASE FOUND!!!", g_tag);
+		#endif
+		SetFailState("%s Database error no database: %s", g_tag, error);
+		// FAIL
 	}
 	
 	Transaction txn;
@@ -119,14 +165,15 @@ void DB_init()
 	"\
 	CREATE TABLE IF NOT EXISTS nt_stored_names \
 	(\
-	steamID	TEXT NOT NULL, \
+	steamID	VARCHAR(32) NOT NULL, \
 	forceName INTEGER NOT NULL DEFAULT 0, \
-	storedName TEXT, \
+	storedName VARCHAR(32), \
 	PRIMARY KEY(steamID) \
 	);\
 	");
 	
-	hDB.Query(DB_fast_callback, "VACUUM", _, DBPrio_High);
+	// only care if it already exists, so we connect then vacuum right away
+	//hDB.Query(DB_fast_callback, "VACUUM", _, DBPrio_High); sqlite only we need to detect what driver we're using in database connect
 	
 	txn.AddQuery(query);
 	
@@ -145,6 +192,10 @@ void TxnFailure_Init(Database db, any data, int numQueries, const char[] error, 
 
 void DB_retrieveCookie(int userid)
 {
+	#if DEBUG
+	PrintToServer("%s retrieving cookie", g_tag);
+	#endif
+		
 	int client = GetClientOfUserId(userid);
 	
 	if(client <= 0 || client > MaxClients)
@@ -152,11 +203,9 @@ void DB_retrieveCookie(int userid)
 		return;
 	}
 	
-	char steamID[32];
-	
-	if(!GetClientAuthId(client, AuthId_SteamID64, steamID, sizeof(steamID)))
+	if(g_steamID[client][0] == '\0')
 	{
-		LogError("%s Error getting SteamID in RetrieveCookie", g_tag);
+		LogError("%s Error RetrieveCookie client had no steamID!", g_tag);
 		return;
 	}
 	
@@ -168,28 +217,64 @@ void DB_retrieveCookie(int userid)
 	FROM nt_stored_names \
 	WHERE steamID = '%s'; \
 	",
-	steamID);
+	g_steamID[client]);
 	
 	hDB.Query(DB_cookie_callback, query, userid, DBPrio_Normal);
 }
 
 void DB_cookie_callback(Database db, DBResultSet results, const char[] error, int userid)
 {
-	if (!db || !results || error[0])
-	{
-		LogError("%s SQL Error: %s", g_tag, error);
-		return;
-	}
-
-	if (SQL_GetRowCount(results) == 0 || !SQL_FetchRow(results))
-	{
-		return;
-	}
+	#if DEBUG
+	PrintToServer("%s cookie results callback", g_tag);
+	#endif
 	
 	int client = GetClientOfUserId(userid);
 	
 	if(client <= 0 || client > MaxClients)
 	{
+		#if DEBUG
+		PrintToServer("%s results callback error client index", g_tag);
+		#endif
+		return;
+	}
+	
+	if (!db || error[0])
+	{
+		#if DEBUG
+		PrintToServer("%s results callback error db error", g_tag);
+		#endif
+		
+		LogError("%s SQL Error: %s", g_tag, error);
+		return;
+	}
+	
+	if(!results)
+	{
+		#if DEBUG
+		PrintToServer("%s results callback error no results handle?", g_tag);
+		#endif
+		
+		LogError("%s SQL Error: %s", g_tag, error);
+		return;
+	}
+	
+	if (SQL_GetRowCount(results) == 0 || !SQL_FetchRow(results))
+	{
+		#if DEBUG
+		PrintToServer("%s no rows?! client had no stored info, saving new info to database", g_tag);
+		#endif
+		
+		GetClientName(client, g_playerNames[client], sizeof(g_playerNames[]));
+		
+		if(g_steamID[client][0] == '\0')
+		{
+			LogError("%s error in cookiecallback saving new info, client had no steamID!", g_tag);
+			return;
+		}
+		
+		DB_insertAll(g_steamID[client], (g_forceName[client] ? 1 : 0), g_playerNames[client]);
+		g_cookiesCached[client] = true;
+		
 		return;
 	}
 	
@@ -198,23 +283,6 @@ void DB_cookie_callback(Database db, DBResultSet results, const char[] error, in
 	g_forceName[client] = !!forceBool;
 	
 	SQL_FetchString(results, 1, g_playerNames[client], sizeof(g_playerNames[]));
-	
-	char bufName[32];
-	char steamID[32];
-	
-	if(g_playerNames[client][0] == '\0')
-	{
-		GetClientName(client, bufName, sizeof(bufName));
-		strcopy(g_playerNames[client], sizeof(g_playerNames[]), bufName);
-		
-		if(!GetClientAuthId(client, AuthId_SteamID64, steamID, sizeof(steamID)))
-		{
-			LogError("%s Error getting SteamID in RetrieveCookieSetnewcookie", g_tag);
-			return;
-		}
-		
-		DB_insertName(steamID, g_forceName[client], g_playerNames[client]);
-	}
 	
 	g_cookiesCached[client] = true;
 	
@@ -225,30 +293,22 @@ void DB_cookie_callback(Database db, DBResultSet results, const char[] error, in
 	if(g_forceMode == 0)
 	{
 		#if DEBUG
-		PrintToServer("[Name Manager] db retrieve callback");
+		PrintToServer("%s cookie callback forcemode 0", g_tag);
 		#endif
 		
 		return;
 	}
 	
 	#if DEBUG
-	PrintToServer("[Name Manager] Cookies Timer");
+	PrintToServer("%s cookie callback timer", g_tag);
 	#endif
 	
-	CreateTimer(2.0, CheckNameTimer, userid, TIMER_FLAG_NO_MAPCHANGE);
-}
-
-public Action CheckCookieTimer(Handle timer, int userid)
-{
-	int client = GetClientOfUserId(userid);
-	
-	if(client <= 0)
+	if(IsValidHandle(g_checkTimer[client]))
 	{
-		return Plugin_Stop;
+		delete g_checkTimer[client];
 	}
 	
-	RequestFrame(CheckClientCookie, client);
-	return Plugin_Stop;
+	g_checkTimer[client] = CreateTimer(2.0, CheckNameTimer, userid, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action StoreName(int client, int args)
@@ -262,20 +322,20 @@ public Action StoreName(int client, int args)
 	
 	if(forceName && (args != 2 && args != 1))
 	{
-		ReplyToCommand(client, "[Name Manager] Usage: sm_forcename <target> <new name> to force a new name on a client");
-		ReplyToCommand(client, "[Name Manager] Usage: sm_forcename <target> to enable forced name on a client");
+		ReplyToCommand(client, "%s Usage: sm_forcename <target> <new name> to force a new name on a client", g_tag);
+		ReplyToCommand(client, "%s Usage: sm_forcename <target> to enable forced name on a client", g_tag);
 		return Plugin_Handled;
 	}
 	
 	if(storeName && args != 2)
 	{
-		ReplyToCommand(client, "[Name Manager] Usage: sm_storename <target> <newname>");
+		ReplyToCommand(client, "%s Usage: sm_storename <target> <newname>", g_tag);
 		return Plugin_Handled;
 	}
 	
 	if(unforce && args != 1)
 	{
-		ReplyToCommand(client, "[Name Manager] Usage: sm_unforcename <target>");
+		ReplyToCommand(client, "%s Usage: sm_unforcename <target>", g_tag);
 		return Plugin_Handled;
 	}
 
@@ -291,19 +351,17 @@ public Action StoreName(int client, int args)
 	int target = FindTarget(client, argTarget, true, true);
 	if(target == -1)
 	{
-		ReplyToCommand(client, "[Name Manager] Target not found");
+		ReplyToCommand(client, "%s Target not found", g_tag);
 		return Plugin_Handled;
 	}
 	
 	if(!IsClientInGame(target) || !g_cookiesCached[target])
 	{
-		ReplyToCommand(client, "[Name Manager] Target cookies are not cached or they are not in game, try again later");
+		ReplyToCommand(client, "%s Target cookies are not cached or they are not in game, try again later", g_tag);
 		return Plugin_Handled;
 	}
 	
-	char steamID[32];
-	
-	if(!GetClientAuthId(target, AuthId_SteamID64, steamID, sizeof(steamID)))
+	if(g_steamID[target][0] == '\0')
 	{
 		PrintToChat(client, "%s Error getting SteamID, try again later", g_tag);
 		return Plugin_Handled;
@@ -311,8 +369,8 @@ public Action StoreName(int client, int args)
 	
 	if(unforce)
 	{
-		DB_clearForce(steamID, 0);
 		g_forceName[target] = false;
+		DB_insertForce(g_steamID[target], 0);
 		return Plugin_Handled;
 	}
 	
@@ -320,20 +378,21 @@ public Action StoreName(int client, int args)
 	{
 		if(args == 1)
 		{
-			SetClientCookie(target, CookieForceName, "1");
+			g_forceName[target] = true;
+			DB_insertForce(g_steamID[target], 1);
 		}
 		else
 		{
-			SetClientCookie(target, CookiePlayerName, argTwo);
-			SetClientCookie(target, CookieForceName, "1");
 			strcopy(g_playerNames[target], sizeof(g_playerNames[]), argTwo);
+			g_forceName[target] = true;
+			DB_insertAll(g_steamID[target], 1, g_playerNames[target]);
 		}
 	}
 	
 	if(storeName)
 	{
-		SetClientCookie(target, CookiePlayerName, argTwo);
 		strcopy(g_playerNames[target], sizeof(g_playerNames[]), argTwo);
+		DB_insertAll(g_steamID[target], (g_forceName[target] ? 1 : 0), argTwo);
 	}
 	
 	if(g_forceMode == 0)
@@ -341,22 +400,29 @@ public Action StoreName(int client, int args)
 		return Plugin_Handled;
 	}
 	
-	CreateTimer(2.0, CheckCookieTimer, GetClientUserId(target), TIMER_FLAG_NO_MAPCHANGE);
+	if(IsValidHandle(g_checkTimer[target]))
+	{
+		delete g_checkTimer[target];
+	}
+	
+	g_checkTimer[target] = CreateTimer(2.0, CheckNameTimer, GetClientUserId(target), TIMER_FLAG_NO_MAPCHANGE);
 	
 	return Plugin_Continue;
 }
 
 void DB_insertForce(const char[] steamID, int forceBool)
 {	
+	// doesnt work for mysql and sqlite 
+	
 	char query[512];
 	
 	char ogQuery[] = 	
 	"\
-	INSERT INTO nt_stored_names(steamID, forceBool) \
+	INSERT INTO nt_stored_names(steamID, forceName) \
 	VALUES ('%s', %d) \
 	ON CONFLICT(steamID) \
 	DO UPDATE SET \
-	nt_stored_names.forceBool = excluded.forceBool; \
+	forceName = excluded.forceName; \
 	";
 	
 	hDB.Format(query, sizeof(query), ogQuery, steamID, forceBool);
@@ -366,16 +432,22 @@ void DB_insertForce(const char[] steamID, int forceBool)
 
 void DB_insertAll(const char[] steamID, int forceBool, const char[] newName)
 {	
+	// doesnt work for mysql and sqlite 
+	
+	#if DEBUG
+	PrintToServer("%s db insert all", g_tag);
+	#endif
+	
 	char query[512];
 	
 	char ogQuery[] = 	
 	"\
-	INSERT INTO nt_stored_names(steamID, forceBool, newName) \
+	INSERT INTO nt_stored_names(steamID, forceName, storedName) \
 	VALUES ('%s', %d, '%s') \
 	ON CONFLICT(steamID) \
 	DO UPDATE SET \
-	nt_stored_names.forceBool = excluded.forceBool, \
-	nt_stored_names.newName = excluded.newName; \
+	forceName = excluded.forceName, \
+	storedName = excluded.storedName; \
 	";
 	
 	hDB.Format(query, sizeof(query), ogQuery, steamID, forceBool, newName);
@@ -499,6 +571,7 @@ public Action CheckTeam(Handle timer, int userid)
 	}
 	
 	g_checkTimer[client] = CreateTimer(2.0, CheckNameTimer, userid, TIMER_FLAG_NO_MAPCHANGE);
+	
 	g_checkingTeam[client] = false;
 	
 	return Plugin_Stop;
@@ -512,7 +585,7 @@ public Action CheckNameTimer(Handle timer, int userid)
 	
 	int client = GetClientOfUserId(userid);
 	
-	if(client <= 0 || g_forceMode == 0 || !IsClientInGame(client) || GetClientTeam(client) <= 0)
+	if(client <= 0 || g_forceMode == 0 || !IsClientInGame(client) || GetClientTeam(client) <= 0 || !g_cookiesCached[client])
 	{
 		return Plugin_Stop;
 	}
@@ -577,6 +650,7 @@ public Action SetNameTimer(Handle timer, int userid)
 	CreateTimer(2.0, ResetNameChangeCooldown, userid, TIMER_FLAG_NO_MAPCHANGE);
 	return Plugin_Stop;
 }
+
 public Action ResetNameBool(Handle timer, int userid)
 {
 	int client = GetClientOfUserId(userid);
@@ -605,20 +679,13 @@ public Action ResetNameChangeCooldown(Handle timer, int userid)
 
 public Action ShowName(int client, int args)
 {
-	/*
-	if(client <= 0)
-	{
-		return Plugin_Handled;
-	}
-	*/
-	
 	RequestFrame(PrintNamesInConsole, client);
 	return Plugin_Handled;
 }
 
 void PrintNamesInConsole(int client)
 {
-	if(client <= 0 || !IsClientInGame(client))
+	if(client > 0 && !IsClientInGame(client))
 	{
 		return;
 	}
@@ -666,6 +733,9 @@ public void OnClientSettingsChanged(int client)
 	
 	if(g_forceMode == 0 || !g_cookiesCached[client] || !IsClientInGame(client) || IsFakeClient(client))
 	{
+		#if DEBUG
+		PrintToServer("%s cookies not cached on settingschanged", g_tag);
+		#endif
 		return;
 	}
 	
@@ -677,9 +747,8 @@ public void OnClientSettingsChanged(int client)
 	if(g_settingName[client])
 	{
 		#if DEBUG
-		PrintToServer("[Name Manager] OnClientSettingsChanged, already setting name");
+		PrintToServer("%s OnClientSettingsChanged, already setting name", g_tag);
 		#endif
-		
 		return;
 	}
 	
@@ -702,11 +771,14 @@ public void OnMapEnd()
 	}
 	
 	g_listCooldown = false;
+	
+	hDB = null;
 }
 
 void ResetClientVariables(int client)
 {
 	g_playerNames[client][0] = '\0';
+	g_steamID[client][0] = '\0';
 	g_cookiesCached[client] = false;
 	g_nameChangeCooldown[client] = false;
 	g_settingName[client] = false;
