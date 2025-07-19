@@ -9,6 +9,7 @@
 #define DEBUG true
 
 Database hDB = null;
+bool g_mysql;
 
 bool g_cookiesCached[NEO_MAXPLAYERS+1];
 bool g_forceName[NEO_MAXPLAYERS+1];
@@ -88,13 +89,13 @@ public void DB_Connect(Database db, const char[] error, any data)
 	if (db == null)
 	{
 		LogError("%s Default Database connection failure: %s", g_tag, error);
-		DB_init();
 	} 
 	else 
 	{
 		hDB = db;
-		DB_init();
 	}
+	
+	DB_init();
 }
 
 public void OnConfigsExecuted()
@@ -138,6 +139,7 @@ void ProcessClient(int userid)
 void DB_init()
 {
 	char error[255];
+	char ident[16];
 	
 	if(hDB == null)
 	{
@@ -154,6 +156,15 @@ void DB_init()
 		#endif
 		SetFailState("%s Database error no database: %s", g_tag, error);
 		// FAIL
+	}
+	
+	hDB.Driver.GetIdentifier(ident, sizeof(ident));
+
+	PrintToServer("---- %s -----", ident);
+	
+	if(StrEqual(ident, "mysql", false))
+	{
+		g_mysql = true;
 	}
 	
 	Transaction txn;
@@ -773,6 +784,7 @@ public void OnMapEnd()
 	g_listCooldown = false;
 	
 	hDB = null;
+	g_mysql = false;
 }
 
 void ResetClientVariables(int client)
