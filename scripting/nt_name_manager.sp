@@ -6,7 +6,7 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-#define DEBUG true
+#define DEBUG false
 
 Database hDB = null;
 bool g_mysql;
@@ -45,7 +45,8 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 public void OnPluginStart()	
 {
 	LoadTranslations("common.phrases");
-	NameForceBehaviour = CreateConVar("sm_name_force", "2", "0 - Off, 1 - Forced name for specific clients, 2 - Forced name for all clients", _, true, 0.0, true, 2.0);
+	// set default 1
+	NameForceBehaviour = CreateConVar("sm_name_force", "1", "0 - Off, 1 - Forced name for specific clients, 2 - Forced name for all clients", _, true, 0.0, true, 2.0);
 	HookConVarChange(NameForceBehaviour, NameForceBehaviour_Changed);
 	RegAdminCmd("sm_storename", StoreName, ADMFLAG_GENERIC, "Stores a clients name");
 	RegAdminCmd("sm_forcename", StoreName, ADMFLAG_GENERIC, "Force a clients name");
@@ -83,9 +84,6 @@ public void OnMapInit()
 
 public void DB_Connect(Database db, const char[] error, any data)
 {
-	// we need to detect what driver we are using mysql or sqlite
-	// also adjust the insert queries accordingly
-	
 	if (db == null)
 	{
 		LogError("%s Default Database connection failure: %s", g_tag, error);
@@ -155,16 +153,22 @@ void DB_init()
 		PrintToServer("%s ERROR NO DATABASE FOUND!!!", g_tag);
 		#endif
 		SetFailState("%s Database error no database: %s", g_tag, error);
-		// FAIL
+		// FAIL !!!
 	}
 	
 	hDB.Driver.GetIdentifier(ident, sizeof(ident));
-
+	
+	#if DEBUG
 	PrintToServer("---- %s -----", ident);
+	#endif
 	
 	if(StrEqual(ident, "mysql", false))
 	{
 		g_mysql = true;
+	}
+	else
+	{
+		g_mysql = false;
 	}
 	
 	Transaction txn;
@@ -183,8 +187,11 @@ void DB_init()
 	);\
 	");
 	
-	// only care if it already exists, so we connect then vacuum right away
-	//hDB.Query(DB_fast_callback, "VACUUM", _, DBPrio_High); sqlite only we need to detect what driver we're using in database connect
+	// only care if it already exists, so we connect then vacuum right away, sqlite only
+	if(!g_mysql)
+	{
+		hDB.Query(DB_fast_callback, "VACUUM", _, DBPrio_High);
+	}
 	
 	txn.AddQuery(query);
 	
@@ -422,19 +429,39 @@ public Action StoreName(int client, int args)
 }
 
 void DB_insertForce(const char[] steamID, int forceBool)
-{	
-	// doesnt work for mysql and sqlite 
+{
+	#if DEBUG
+	PrintToServer("%s db insert force", g_tag);
+	#endif
 	
 	char query[512];
+	char ogQuery[512];
 	
-	char ogQuery[] = 	
-	"\
-	INSERT INTO nt_stored_names(steamID, forceName) \
-	VALUES ('%s', %d) \
-	ON CONFLICT(steamID) \
-	DO UPDATE SET \
-	forceName = excluded.forceName; \
-	";
+	if(g_mysql)
+	{
+		char mysqlQuery[] = 	
+		"\
+		INSERT INTO nt_stored_names(steamID, forceName) \
+		VALUES ('%s', %d) \
+		ON DUPLICATE KEY UPDATE \
+		forceName = VALUES(forceName); \
+		";
+		
+		strcopy(ogQuery, sizeof(ogQuery), mysqlQuery);
+	}
+	else
+	{
+		char liteQuery[] = 	
+		"\
+		INSERT INTO nt_stored_names(steamID, forceName) \
+		VALUES ('%s', %d) \
+		ON CONFLICT(steamID) \
+		DO UPDATE SET \
+		forceName = excluded.forceName; \
+		";
+		
+		strcopy(ogQuery, sizeof(ogQuery), liteQuery);
+	}
 	
 	hDB.Format(query, sizeof(query), ogQuery, steamID, forceBool);
 	
@@ -442,24 +469,41 @@ void DB_insertForce(const char[] steamID, int forceBool)
 }
 
 void DB_insertAll(const char[] steamID, int forceBool, const char[] newName)
-{	
-	// doesnt work for mysql and sqlite 
-	
+{
 	#if DEBUG
 	PrintToServer("%s db insert all", g_tag);
 	#endif
 	
 	char query[512];
+	char ogQuery[512];
 	
-	char ogQuery[] = 	
-	"\
-	INSERT INTO nt_stored_names(steamID, forceName, storedName) \
-	VALUES ('%s', %d, '%s') \
-	ON CONFLICT(steamID) \
-	DO UPDATE SET \
-	forceName = excluded.forceName, \
-	storedName = excluded.storedName; \
-	";
+	if(g_mysql)
+	{
+		char mysqlQuery[] = 	
+		"\
+		INSERT INTO nt_stored_names(steamID, forceName, storedName) \
+		VALUES ('%s', %d, '%s') \
+		ON DUPLICATE KEY UPDATE \
+		forceName = VALUES(forceName), \
+		storedName = VALUES(storedName); \
+		";
+		
+		strcopy(ogQuery, sizeof(ogQuery), mysqlQuery);
+	}
+	else
+	{
+		char liteQuery[] = 	
+		"\
+		INSERT INTO nt_stored_names(steamID, forceName, storedName) \
+		VALUES ('%s', %d, '%s') \
+		ON CONFLICT(steamID) \
+		DO UPDATE SET \
+		forceName = excluded.forceName, \
+		storedName = excluded.storedName; \
+		";
+		
+		strcopy(ogQuery, sizeof(ogQuery), liteQuery);
+	}
 	
 	hDB.Format(query, sizeof(query), ogQuery, steamID, forceBool, newName);
 	
@@ -696,7 +740,7 @@ public Action ShowName(int client, int args)
 
 void PrintNamesInConsole(int client)
 {
-	if(client > 0 && !IsClientInGame(client))
+	if(client >= 1 && !IsClientInGame(client))
 	{
 		return;
 	}
