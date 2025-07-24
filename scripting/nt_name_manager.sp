@@ -64,7 +64,7 @@ public void OnPluginStart()
 		
 		for(int client = 1; client <= MaxClients; client++)
 		{
-			if(IsClientInGame(client) && !IsFakeClient(client))
+			if(IsClientInGame(client) && !IsFakeClient(client) && IsClientAuthorized(client))
 			{
 				ProcessClient(GetClientUserId(client));
 			}
