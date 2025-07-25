@@ -32,7 +32,7 @@ public Plugin myinfo = {
 	name = "NT Name Manager",
 	author = "bauxite, credits to Teamkiller324, Glubsy",
 	description = "!storename, !forcename, !shownames, cvar sm_name_force 0/1/2",
-	version = "0.6.0",
+	version = "0.6.1",
 	url = "https://github.com/bauxiteDYS/SM-NT-Name-Manager",
 };
 
